@@ -5260,22 +5260,28 @@ class StubGenerator: public StubCodeGenerator {
     m5_FF_GG_HH_II_epilogue_d(a, b, s);
   }
 
-  // a += ((b & d) | (c & (~d))) + x + ac;
+  // a += ((c & (~d)) + (b & d)) + x + ac;
   // a = Integer.rotateLeft(a, s) + b;
   void md5_GG(BufRegCache& reg_cache,
               Register a, Register b, Register c, Register d,
               int k, int s, int t,
               Register rtmp1, Register rtmp2) {
-    // rtmp1 = b & d
-    __ andr(rtmp1, b, d);
+    m5_FF_GG_HH_II_epilogue_b(reg_cache, a, k);
+    m5_FF_GG_HH_II_epilogue_a(a, t);
 
-    // rtmp2 = c & (~d)
-    __ andn(rtmp2, c, d);
+    // rtmp1 = c & (~d)
+    __ andn(rtmp1, c, d);
 
-    // rtmp1 = (b & d) | (c & (~d))
-    __ orr(rtmp1, rtmp1, rtmp2);
+    // rtmp2 = b & d
+    __ andr(rtmp2, b, d);
 
-    m5_FF_GG_HH_II_epilogue(reg_cache, a, b, c, d, k, s, t, rtmp1);
+    // a += c & (~d)
+    m5_FF_GG_HH_II_epilogue_c(a, rtmp1);
+
+    // a += b & d
+    m5_FF_GG_HH_II_epilogue_c(a, rtmp2);
+
+    m5_FF_GG_HH_II_epilogue_d(a, b, s);
   }
 
   // a += ((b ^ c) ^ d) + x + ac;
