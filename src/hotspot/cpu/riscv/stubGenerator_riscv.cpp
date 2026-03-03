@@ -5329,11 +5329,15 @@ class StubGenerator: public StubCodeGenerator {
               Register a, Register b, Register c, Register d,
               int k, int s, int t,
               Register rtmp1, Register rtmp2) {
+    m5_FF_GG_HH_II_epilogue_b(reg_cache, a, k);
+    m5_FF_GG_HH_II_epilogue_a(a, t);
+
     // rtmp1 = c ^ (b | (~d))
     __ orn(rtmp2, b, d);
     __ xorr(rtmp1, c, rtmp2);
 
-    m5_FF_GG_HH_II_epilogue(reg_cache, a, b, c, d, k, s, t, rtmp1);
+    m5_FF_GG_HH_II_epilogue_c(a, rtmp1);
+    m5_FF_GG_HH_II_epilogue_d(a, b, s);
   }
 
   // Arguments:
