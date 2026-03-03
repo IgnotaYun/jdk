@@ -5284,17 +5284,43 @@ class StubGenerator: public StubCodeGenerator {
     m5_FF_GG_HH_II_epilogue_d(a, b, s);
   }
 
-  // a += ((b ^ c) ^ d) + x + ac;
+  // a += (b ^ (c ^ d)) + x + ac;
   // a = Integer.rotateLeft(a, s) + b;
+  void md5_HH_a(BufRegCache& reg_cache,
+              Register a, Register b, Register c, Register d,
+              int k, int s, int t,
+              Register rtmp1, Register rtmp2) {
+    // precomputed rtmp2 = (c ^ d)
+    // rtmp1 = b ^ (c ^ d) = b ^ rtmp2
+    __ xorr(rtmp1, b, rtmp2);
+    m5_FF_GG_HH_II_epilogue_b(reg_cache, a, k);
+    m5_FF_GG_HH_II_epilogue_a(a, t);
+  }
+
+  void md5_HH_b(BufRegCache& reg_cache,
+              Register a, Register b, Register c, Register d,
+              int k, int s, int t,
+              Register rtmp1, Register rtmp2) {
+    // rtmp2 = b ^ (c ^ d) ^ d == (b ^ c)
+    // rtmp2 will be next round's (c ^ d)
+    __ xorr(rtmp2, rtmp1, d);
+  }
+
+  void md5_HH_c(BufRegCache& reg_cache,
+              Register a, Register b, Register c, Register d,
+              int k, int s, int t,
+              Register rtmp1, Register rtmp2) {
+    m5_FF_GG_HH_II_epilogue_c(a, rtmp1);
+    m5_FF_GG_HH_II_epilogue_d(a, b, s);
+  }
+
   void md5_HH(BufRegCache& reg_cache,
               Register a, Register b, Register c, Register d,
               int k, int s, int t,
               Register rtmp1, Register rtmp2) {
-    // rtmp1 = (b ^ c) ^ d
-    __ xorr(rtmp2, b, c);
-    __ xorr(rtmp1, rtmp2, d);
-
-    m5_FF_GG_HH_II_epilogue(reg_cache, a, b, c, d, k, s, t, rtmp1);
+    md5_HH_a(reg_cache, a, b, c, d, k, s, t, rtmp1, rtmp2);
+    md5_HH_b(reg_cache, a, b, c, d, k, s, t, rtmp1, rtmp2);
+    md5_HH_c(reg_cache, a, b, c, d, k, s, t, rtmp1, rtmp2);
   }
 
   // a += (c ^ (b | (~d))) + x + ac;
@@ -5505,6 +5531,8 @@ class StubGenerator: public StubCodeGenerator {
     md5_GG(reg_cache, b, c, d, a, 12, S24, 0x8d2a4c8a, rtmp1, rtmp2);
 
     // Round 3
+    // pre-compute (c ^ d) for the first HH round.
+    __ xorr (rtmp2, c, d);
     md5_HH(reg_cache, a, b, c, d,  5, S31, 0xfffa3942, rtmp1, rtmp2);
     md5_HH(reg_cache, d, a, b, c,  8, S32, 0x8771f681, rtmp1, rtmp2);
     md5_HH(reg_cache, c, d, a, b, 11, S33, 0x6d9d6122, rtmp1, rtmp2);
@@ -5520,7 +5548,8 @@ class StubGenerator: public StubCodeGenerator {
     md5_HH(reg_cache, a, b, c, d,  9, S31, 0xd9d4d039, rtmp1, rtmp2);
     md5_HH(reg_cache, d, a, b, c, 12, S32, 0xe6db99e5, rtmp1, rtmp2);
     md5_HH(reg_cache, c, d, a, b, 15, S33, 0x1fa27cf8, rtmp1, rtmp2);
-    md5_HH(reg_cache, b, c, d, a,  2, S34, 0xc4ac5665, rtmp1, rtmp2);
+    md5_HH_a(reg_cache, b, c, d, a,  2, S34, 0xc4ac5665, rtmp1, rtmp2);
+    md5_HH_c(reg_cache, b, c, d, a,  2, S34, 0xc4ac5665, rtmp1, rtmp2);
 
     // Round 4
     md5_II(reg_cache, a, b, c, d,  0, S41, 0xf4292244, rtmp1, rtmp2);
