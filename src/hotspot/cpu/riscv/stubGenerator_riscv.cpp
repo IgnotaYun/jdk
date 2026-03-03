@@ -5199,23 +5199,42 @@ class StubGenerator: public StubCodeGenerator {
 
   typedef RegCache<8> BufRegCache;
 
+  // a += ac;
+  void m5_FF_GG_HH_II_epilogue_a(Register a, int t) {
+    // a += ac
+    __ addw(a, a, t, t1);
+  }
+
+  // a += x;
+  void m5_FF_GG_HH_II_epilogue_b(BufRegCache& reg_cache,
+                               Register a, int k) {
+    // a += x;
+    reg_cache.add_u32(a, k);
+  }
+
+  // a += value;
+  void m5_FF_GG_HH_II_epilogue_c(Register a, Register value) {
+    // a += value;
+    __ addw(a, a, value);
+  }
+
+  // a = Integer.rotateLeft(a, s) + b;
+  void m5_FF_GG_HH_II_epilogue_d(Register a, Register b, int s) {
+    // a = Integer.rotateLeft(a, s) + b;
+    __ rolw(a, a, s);
+    __ addw(a, a, b);
+  }
+
   // a += value + x + ac;
   // a = Integer.rotateLeft(a, s) + b;
   void m5_FF_GG_HH_II_epilogue(BufRegCache& reg_cache,
                                Register a, Register b, Register c, Register d,
                                int k, int s, int t,
                                Register value) {
-    // a += ac
-    __ addw(a, a, t, t1);
-
-    // a += x;
-    reg_cache.add_u32(a, k);
-    // a += value;
-    __ addw(a, a, value);
-
-    // a = Integer.rotateLeft(a, s) + b;
-    __ rolw(a, a, s);
-    __ addw(a, a, b);
+    m5_FF_GG_HH_II_epilogue_b(reg_cache, a, k);
+    m5_FF_GG_HH_II_epilogue_a(a, t);
+    m5_FF_GG_HH_II_epilogue_c(a, value);
+    m5_FF_GG_HH_II_epilogue_d(a, b, s);
   }
 
   // a += ((b & c) | ((~b) & d)) + x + ac;
