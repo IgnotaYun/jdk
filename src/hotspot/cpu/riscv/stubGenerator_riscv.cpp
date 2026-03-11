@@ -5840,21 +5840,20 @@ class StubGenerator: public StubCodeGenerator {
     assert_different_registers(dst, x, y, z, t0, t1);
 
     if (round < 20) {
-      // (x & y) ^ (~x & z)
-      __ andr(t0, x, y);
-      __ andn(dst, z, x);
-      __ xorr(dst, dst, t0);
+      // (x & y) ^ (~x & z) = z ^ (x & (y ^ z))
+      __ xorr(dst, y, z);
+      __ andr(dst, x, dst);
+      __ xorr(dst, z, dst);
     } else if (round >= 40 && round < 60) {
-      // (x & y) ^ (x & z) ^ (y & z)
-      __ andr(t0, x, y);
-      __ andr(t1, x, z);
-      __ andr(dst, y, z);
-      __ xorr(dst, dst, t0);
+      // (x & y) ^ (x & z) ^ (y & z) = (x & y) ^ (z & (x ^ y))
+      __ xorr(t0, x, y);
+      __ andr(t1, x, y);
+      __ andr(dst, z, t0);
       __ xorr(dst, dst, t1);
     } else {
       // x ^ y ^ z
-      __ xorr(dst, x, y);
-      __ xorr(dst, dst, z);
+      __ xorr(dst, y, z);
+      __ xorr(dst, dst, x);
     }
   }
 
