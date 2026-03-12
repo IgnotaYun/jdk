@@ -5840,6 +5840,7 @@ class StubGenerator: public StubCodeGenerator {
     ws[8] = ws_0;
   }
 
+#define HW_ZVBB 0
   // W't =
   //    M't,                                      0 <=  t <= 15
   //    ROTL'1(W't-3 ^ W't-8 ^ W't-14 ^ W't-16),  16 <= t <= 79
@@ -5864,9 +5865,14 @@ class StubGenerator: public StubCodeGenerator {
       //
       // This layout matches RVV e32 element order when loaded as e64.
 
-      // Configure RVV for e32, vl=4 at start of phase
       if (round == 0) {
+        #if defined(HW_ZVBB) && HW_ZVBB
+        // Configure RVV for e32, vl=4 at start of phase
         __ vsetivli(x0, 4, Assembler::e32, Assembler::m1);
+        #else
+        // Configure RVV for e64, vl=2 at start of phase (for packing 2x32-bit)
+        __ vsetivli(x0, 2, Assembler::e64, Assembler::m1);
+        #endif
       }
 
       if ((round % 2) == 0) {
@@ -5878,12 +5884,20 @@ class StubGenerator: public StubCodeGenerator {
         // Now: (W[odd]_hi : W[even]_lo) - W[even] at low
         __ addw(cur_w, ws[round/2], cur_k);                // W[even] from low
 
+        #if defined(HW_ZVBB) && HW_ZVBB
         // RVV: load 4 words every 4 rounds
         if ((round % 4) == 0) {
           __ addi(t0, buf, (round/4) * 16);
           __ vle32_v(vws[round/4], t0);
           __ vrev8_v(vws[round/4], vws[round/4]);
         }
+        #else
+        // RVV: move scalar to vector every 4 rounds
+        if ((round % 4) == 2) {
+          __ vmv_s_x(vt, ws[round/2]);
+          __ vslide1up_vx(vws[round/4], vt, ws[(round-2)/2]);
+        }
+        #endif
       } else {
         __ srli(cur_w, ws[round/2], 32);          // W[odd] from high
         __ addw(cur_w, cur_w, cur_k);
@@ -6007,7 +6021,14 @@ class StubGenerator: public StubCodeGenerator {
 
       __ vxor_vv(vt, vt, vws[(idx - 28) / 4]);
       __ vxor_vv(vws[idx / 4], vws[idx / 4], vt);
+      #if defined(HW_ZVBB) && HW_ZVBB
       __ vror_vi(vws[idx / 4], vws[idx / 4], 30);
+      #else
+      __ vsll_vi(vt, vws[idx / 4], 2);
+      __ vsrl_vi(vws[idx / 4], vws[idx / 4], 30);
+      __ vor_vv(vws[idx / 4], vws[idx / 4], vt);
+      #endif
+
 
       rotate_vws();
 
@@ -6046,7 +6067,13 @@ class StubGenerator: public StubCodeGenerator {
           __ vxor_vv(vt, vt, vws[(idx - 28) / 4]);
           __ vxor_vv(vws[idx / 4], vws[idx / 4], vt);
           // Rotate the newly computed W[idx+4..idx+7] to final position.
+          #if defined(HW_ZVBB) && HW_ZVBB
           __ vror_vi(vws[idx / 4], vws[idx / 4], 30);
+          #else
+          __ vsll_vi(vt, vws[idx / 4], 2);
+          __ vsrl_vi(vws[idx / 4], vws[idx / 4], 30);
+          __ vor_vv(vws[idx / 4], vws[idx / 4], vt);
+          #endif
         }
 
         __ addw(cur_w, ws[1], cur_k);
