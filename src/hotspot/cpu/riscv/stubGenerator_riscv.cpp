@@ -5840,6 +5840,249 @@ class StubGenerator: public StubCodeGenerator {
     ws[8] = ws_0;
   }
 
+  // W't =
+  //    M't,                                      0 <=  t <= 15
+  //    ROTL'1(W't-3 ^ W't-8 ^ W't-14 ^ W't-16),  16 <= t <= 79
+  //
+  // Vector-friendly layout: ws[i] = (W[2i+1]_hi : W[2i]_lo)
+  // This matches RVV e32 little-endian element ordering when packed as e64.
+  //
+  // vws[0..7] will hold W[0..31] after round 31, for RVV ROTL2 in rounds 32-79.
+  // vt is a temporary vector register.
+  void sha1_vector_prepare_w(Register cur_w, Register ws[], VectorRegister vws[], VectorRegister vts[],
+                             Register buf, Register cur_k, Register rmask, int round) {
+    assert(round >= 0 && round < 80, "must be");
+
+    VectorRegister vt = vts[0];
+
+    if (round < 16) {
+      // In the first 16 rounds, in ws[], every register contains 2 W't:
+      //   ws[0] = (W[1]_hi : W[0]_lo)
+      //   ws[1] = (W[3]_hi : W[2]_lo)
+      //   ...
+      //   ws[7] = (W[15]_hi : W[14]_lo)
+      //
+      // This layout matches RVV e32 element order when loaded as e64.
+
+      // Configure RVV for e32, vl=4 at start of phase
+      if (round == 0) {
+        __ vsetivli(x0, 4, Assembler::e32, Assembler::m1);
+      }
+
+      if ((round % 2) == 0) {
+        __ ld(ws[round/2], Address(buf, (round/2) * 8));
+        // reverse bytes, as SHA-1 is defined in big-endian.
+        __ revb(ws[round/2], ws[round/2]);
+        // After revb: (W[even]_hi : W[odd]_lo), need (W[odd]_hi : W[even]_lo)
+        __ ror(ws[round/2], ws[round/2], 32, t0);
+        // Now: (W[odd]_hi : W[even]_lo) - W[even] at low
+        __ addw(cur_w, ws[round/2], cur_k);                // W[even] from low
+
+        // RVV: load 4 words every 4 rounds
+        if ((round % 4) == 0) {
+          __ addi(t0, buf, (round/4) * 16);
+          __ vle32_v(vws[round/4], t0);
+          __ vrev8_v(vws[round/4], vws[round/4]);
+        }
+      } else {
+        __ srli(cur_w, ws[round/2], 32);          // W[odd] from high
+        __ addw(cur_w, cur_w, cur_k);
+      }
+
+      return;
+    }
+
+    // Rounds 16-31: SWAR ROTL1
+    if (round < 32) {
+      // Configure RVV for e64, vl=2 at start of phase (for packing 2x64-bit)
+      if (round == 16) {
+        __ vsetivli(x0, 2, Assembler::e64, Assembler::m1);
+      }
+
+      if ((round % 2) == 0) {
+        int idx = 16;
+        // SWAR: compute both W[idx] and W[idx+1] together
+        // W't = ROTL'1(W't-3 ^ W't-8 ^ W't-14 ^ W't-16)
+        //
+        // With vector-friendly layout ws[i] = (W[2i+1]_hi : W[2i]_lo):
+        //   t-16: ws[(idx-16)/2] = (W[idx-15]_hi : W[idx-16]_lo)
+        //   t-14: ws[(idx-14)/2] = (W[idx-13]_hi : W[idx-14]_lo)
+        //   t-8:  ws[(idx-8)/2]  = (W[idx-7]_hi  : W[idx-8]_lo)
+        //
+        // Misaligned t-3 operand: need (W[idx-2]_hi : W[idx-3]_lo)
+        //   W[idx-3] is odd,  resides in high 32 bits of ws[(idx-4)/2]
+        //   W[idx-2] is even, resides in low  32 bits of ws[(idx-2)/2]
+
+        // Build shuffled t-3 operand: (W[idx-2] : W[idx-3])
+        __ slli(t0, ws[(idx-2)/2], 32);   // t0.hi = W[idx-2] (was in low)
+        __ srli(t1, ws[(idx-4)/2], 32);   // t1.lo = W[idx-3] (was in high)
+        __ orr(t0, t0, t1);               // t0 = (W[idx-2] : W[idx-3])
+
+        // XOR with aligned operands
+        __ xorr(t1, ws[(idx-16)/2], ws[(idx-14)/2]);
+        __ xorr(t1, t1, ws[(idx-8)/2]);
+        __ xorr(t0, t0, t1);              // t0 = pre-rotate for (W[idx+1] : W[idx])
+
+        // SWAR ROTL1: ((t0 << 1) & ~rmask) | ((t0 >> 31) & rmask)
+        // This rotates both 32-bit halves independently without cross-contamination.
+        // rmask = 0x0000000100000001 marks bit 32 and bit 0 (cross-leak positions)
+        __ srli(t1, t0, 31);              // t1 = wrap bit candidates at bit 32 and bit 0
+        __ slli(cur_w, t0, 1);            // cur_w = t0 << 1 (ILP with above)
+        __ andr(t1, t1, rmask);           // t1 = wrap bits isolated
+        __ andn(t0, cur_w, rmask);        // t0 = (t0<<1) & ~rmask (clear cross-leak bits)
+                                          // Note: rd(t0) != rs1(cur_w), satisfies andn constraint
+        __ orr(ws[idx/2], t0, t1);        // ws[8] = (W[idx+1] : W[idx])
+
+        // Extract W[idx] (low 32 bits) for current round
+        __ addw(cur_w, ws[idx/2], cur_k);          // W[idx] (even) from low
+
+        // RVV: pack ws[8] into vector registers every 4 rounds
+        // t=18,22,26,30: vmv.s.x to start new vreg
+        // t=16,20,24,28: vslide1up to complete vreg
+        if ((round % 4) == 2) {
+          // Start packing: vws[4 + (round-16)/4] e64[0] = ws[7] (last W of previous block)
+          __ vmv_s_x(vt, ws[idx/2]);
+          // Complete packing: vws[...] e64[1] = ws[8] (current W block)
+          __ vslide1up_vx(vws[4 + (round - 16) / 4], vt, ws[(idx - 2)/2]);
+        }
+
+        return;
+      }
+
+      // Odd round: W[idx] was already computed in the previous even round
+      int idx = 17;
+      __ srli(cur_w, ws[(idx-1)/2], 32);  // cur_w = ws[8].hi = W[idx] (odd from high)
+      __ addw(cur_w, cur_w, cur_k);
+
+      // shift the w't registers, so they start from ws[0] again.
+      // now, valid w't values are at:
+      //  w0 ~ w15: ws[0] ~ ws[7]
+      Register ws_0 = ws[0];
+      for (int i = 0; i < 16/2; i++) {
+        ws[i] = ws[i+1];
+      }
+      ws[8] = ws_0;
+      return;
+    }
+
+    // Rounds 32-79: interwoven RVV ROTL2 with one-block-ahead pre-issue.
+    // W[t] = ROTL2(W[t-6] ^ W[t-16] ^ W[t-28] ^ W[t-32])
+    //
+    // vws[0..7]: ring window (ws-style)
+    // vws[7]: current block being consumed by scalar (4 words)
+    // vws[8]: next block pre-issued while scalar consumes vws[0]
+    // ws[0..3]: scalar cache for current block lane0/lane1 (for extraction)
+    // ws[4..7]: scalar cache for next block lane0/lane1 (deeper interweave)
+    if (round == 32) {
+      __ vsetivli(x0, 4, Assembler::e32, Assembler::m1);
+    }
+
+    int idx = 32;
+    int elem = round % 4;
+
+    auto rotate_vws = [&]() {
+      VectorRegister vws_0 = vws[0];
+      for (int i = 0; i < 8; i++) {
+        vws[i] = vws[i + 1];
+      }
+      vws[8] = vws_0;
+    };
+
+    auto rotate_ws = [&]() {
+      Register ws_0 = ws[0], ws_1 = ws[1], ws_2 = ws[2], ws_3 = ws[3];
+      // We don't need all 9 registers.
+      for (int i = 0; i < 4; i++) {
+        ws[i] = ws[i + 4];
+      }
+      ws[4] = ws_0, ws[5] = ws_1, ws[6] = ws_2, ws[7] = ws_3;
+    };
+
+    // Bootstrap at round 32: build current block only, rotate, 
+    // then let switch handle pre-issue and extraction.
+    if (round == 32) {
+      // First block B8 = W[32..35] from initial ring B0..B7.
+      __ vxor_vv(vt, vws[(idx - 32) / 4], vws[(idx - 16) / 4]);
+      __ vslidedown_vi(vws[idx / 4], vws[(idx - 8) / 4], 2);
+      __ vslideup_vi(vws[idx / 4], vws[(idx - 4) / 4], 2);
+
+      __ vxor_vv(vt, vt, vws[(idx - 28) / 4]);
+      __ vxor_vv(vws[idx / 4], vws[idx / 4], vt);
+      __ vror_vi(vws[idx / 4], vws[idx / 4], 30);
+
+      rotate_vws();
+
+      // Extract and setup Ws for round 32-35.
+      __ vmv_x_s(ws[4], vws[(idx - 4) / 4]);
+      __ vslidedown_vi(vts[1], vws[(idx - 4) / 4], 1);
+      __ vmv_x_s(ws[5], vts[1]);
+      __ vslidedown_vi(vts[2], vws[(idx - 4) / 4], 2);
+      __ vmv_x_s(ws[6], vts[2]);
+      __ vslidedown_vi(vts[3], vws[(idx - 4) / 4], 3);
+      __ vmv_x_s(ws[7], vts[3]);
+
+      rotate_ws();
+    }
+
+    switch (elem) {
+      case 0:
+        // Pre-issue next block while scalar is consuming current.
+        // Skip at round 76 (next block would be beyond W[79]).
+        if (round < 76) {
+          // Compute W[idx+0..idx+3], with fixed-window indexing, Part 1.
+          // Aligned terms: B(idx-32), B(idx-16).
+          __ vxor_vv(vt, vws[(idx - 32) / 4], vws[(idx - 16) / 4]);
+          // Straddle term: B((idx+4)-8) low half + current block high half.
+          __ vslidedown_vi(vws[idx / 4], vws[(idx - 8) / 4], 2);
+          __ vslideup_vi(vws[idx / 4], vws[(idx - 4) / 4], 2);
+        }
+
+        __ addw(cur_w, ws[0], cur_k);
+        break;
+
+      case 1:
+        if (round < 76) {
+          // Compute W[idx+0..idx+3], with fixed-window indexing, Part 2.
+          // Aligned terms: B(idx-28).
+          __ vxor_vv(vt, vt, vws[(idx - 28) / 4]);
+          __ vxor_vv(vws[idx / 4], vws[idx / 4], vt);
+          // Rotate the newly computed W[idx+4..idx+7] to final position.
+          __ vror_vi(vws[idx / 4], vws[idx / 4], 30);
+        }
+
+        __ addw(cur_w, ws[1], cur_k);
+        break;
+
+      case 2:
+        if (round < 76) {
+          __ vmv_x_s(ws[4], vws[idx / 4]);
+          __ vslidedown_vi(vts[1], vws[idx / 4], 1);
+          __ vmv_x_s(ws[5], vts[1]);
+        }
+
+        __ addw(cur_w, ws[2], cur_k);
+        break;
+
+      case 3:
+        if (round < 76) {
+          __ vslidedown_vi(vts[2], vws[idx / 4], 2);
+          __ vmv_x_s(ws[6], vts[2]);
+          __ vslidedown_vi(vts[3], vws[idx / 4], 3);
+          __ vmv_x_s(ws[7], vts[3]);
+        }
+
+        __ addw(cur_w, ws[3], cur_k);
+
+        if (round < 76) {
+          rotate_vws();
+          rotate_ws();
+        }
+        break;
+
+      default:
+        ShouldNotReachHere();
+    }
+  }
+
   // f't(x, y, z) =
   //    Ch(x, y, z)     = (x & y) ^ (~x & z)            , 0  <= t <= 19
   //    Parity(x, y, z) = x ^ y ^ z                     , 20 <= t <= 39
@@ -6011,6 +6254,8 @@ class StubGenerator: public StubCodeGenerator {
     Register ws[9] = {x29, x30, x31, x18,
                       x19, x20, x21, x22,
                       x23}; // auxiliary register for calculating w's value
+    VectorRegister vws[9] = {v10, v11, v12, v13, v14, v15, v16, v17, v18};
+    VectorRegister vts[4] = {v20, v21, v22, v23};
     // mask register used for SWAR rotation
     const Register rmask = x8;
     // current k't's value
@@ -6055,7 +6300,8 @@ class StubGenerator: public StubCodeGenerator {
       sha1_prepare_k(cur_k, round);
 
       // prepare W't value
-      sha1_prepare_w(cur_w, ws, buf, cur_k, rmask, round);
+      UseRVV ? sha1_vector_prepare_w(cur_w, ws, vws, vts, buf, cur_k, rmask, round)
+             : sha1_prepare_w(cur_w, ws, buf, cur_k, rmask, round);
 
       // one round process
       sha1_process_round(a, b, c, d, e, cur_w, t2, round);
