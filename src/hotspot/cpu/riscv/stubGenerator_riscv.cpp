@@ -5185,7 +5185,8 @@ class StubGenerator: public StubCodeGenerator {
   // W't =
   //    M't,                                      0 <=  t <= 15
   //    ROTL'1(W't-3 ^ W't-8 ^ W't-14 ^ W't-16),  16 <= t <= 79
-  void sha1_prepare_w(Register cur_w, Register ws[], Register buf, int round) {
+  void sha1_prepare_w(Register cur_w, Register ws[], Register buf, Register cur_k,
+                      int round) {
     assert(round >= 0 && round < 80, "must be");
 
     if (round < 16) {
@@ -5200,8 +5201,9 @@ class StubGenerator: public StubCodeGenerator {
         // reverse bytes, as SHA-1 is defined in big-endian.
         __ revb(ws[round/2], ws[round/2]);
         __ srli(cur_w, ws[round/2], 32);
+        __ addw(cur_w, cur_w, cur_k);
       } else {
-        __ mv(cur_w, ws[round/2]);
+        __ addw(cur_w, ws[round/2], cur_k);
       }
 
       return;
@@ -5227,6 +5229,8 @@ class StubGenerator: public StubCodeGenerator {
       //  w15:      ws[8]'s higher 32 bits
       __ slli(ws[idx/2], cur_w, 32);
 
+      __ addw(cur_w, cur_w, cur_k);
+
       return;
     }
 
@@ -5241,8 +5245,9 @@ class StubGenerator: public StubCodeGenerator {
     __ rolw(cur_w, cur_w, 1, t0);
 
     // copy the cur_w value to ws[8]
-    __ zext(cur_w, cur_w, 32);
-    __ orr(ws[idx/2], ws[idx/2], cur_w);
+    __ add_uw(ws[idx/2], cur_w, ws[idx/2], t1);
+
+    __ addw(cur_w, cur_w, cur_k);
 
     // shift the w't registers, so they start from ws[0] again.
     // now, valid w't values are at:
@@ -5282,44 +5287,31 @@ class StubGenerator: public StubCodeGenerator {
   }
 
   // T = ROTL'5(a) + f't(b, c, d) + e + K't + W't
-  // e = d
-  // d = c
-  // c = ROTL'30(b)
-  // b = a
-  // a = T
+  // Updates values in place as follows to avoid register-move overhead:
+  //   a <- e = T
+  //   b <- a
+  //   c <- b = ROTL'30(b)
+  //   d <- c
+  //   e <- d
   void sha1_process_round(Register a, Register b, Register c, Register d, Register e,
-                          Register cur_k, Register cur_w, Register tmp, int round) {
+                          Register cur_w, Register tmp, int round) {
     assert(round >= 0 && round < 80, "must be");
-    assert_different_registers(a, b, c, d, e, cur_w, cur_k, tmp, t0);
+    assert_different_registers(a, b, c, d, e, cur_w, tmp, t0);
 
     // T = ROTL'5(a) + f't(b, c, d) + e + K't + W't
 
-    // cur_w will be recalculated at the beginning of each round,
-    // so, we can reuse it as a temp register here.
-    Register tmp2 = cur_w;
+    // Accumulate T directly into 'e' (prev e), physical register becomes next-round 'a'.
+    __ add(e, e, cur_w);
 
-    // reuse e as a temporary register, as we will mv new value into it later
-    Register tmp3 = e;
-    __ add(tmp2, cur_k, tmp2);
-    __ add(tmp3, tmp3, tmp2);
-    __ rolw(tmp2, a, 5, t0);
+    // cur_w is dead after W contribution above; reuse it for f(b,c,d).
+    sha1_f(cur_w, b, c, d, round);
 
-    sha1_f(tmp, b, c, d, round);
+    // b becomes next-round 'c'.
+    __ rolw(b, b, 30);
 
-    __ add(tmp2, tmp2, tmp);
-    __ add(tmp2, tmp2, tmp3);
-
-    // e = d
-    // d = c
-    // c = ROTL'30(b)
-    // b = a
-    // a = T
-    __ mv(e, d);
-    __ mv(d, c);
-
-    __ rolw(c, b, 30);
-    __ mv(b, a);
-    __ mv(a, tmp2);
+    __ add(e, e, cur_w);
+    __ rolw(tmp, a, 5, t0);
+    __ add(e, e, tmp);
   }
 
   // H(i)0 = a + H(i-1)0
@@ -5418,7 +5410,7 @@ class StubGenerator: public StubCodeGenerator {
     // [saved-reg]: x18 - x27
 
     // h0/1/2/3/4
-    const Register a = x14, b = x15, c = x16, d = x17, e = x28;
+    const Register a0 = x14, b0 = x15, c0 = x16, d0 = x17, e0 = x28;
     // w0, w1, ... w15
     // put two adjecent w's in one register:
     //    one at high word part, another at low word part
@@ -5457,28 +5449,35 @@ class StubGenerator: public StubCodeGenerator {
     // we can apply further optimization, which is to just ignore the
     // higher 32-bits in a/c/e, rather than set the higher
     // 32-bits of a/c/e to zero explicitly with extra instructions.
-    __ ld(a, Address(state, 0));
-    __ srli(b, a, 32);
-    __ ld(c, Address(state, 8));
-    __ srli(d, c, 32);
-    __ lw(e, Address(state, 16));
+    __ ld(a0, Address(state, 0));
+    __ srli(b0, a0, 32);
+    __ ld(c0, Address(state, 8));
+    __ srli(d0, c0, 32);
+    __ lw(e0, Address(state, 16));
 
     Label L_sha1_loop;
     if (multi_block) {
       __ BIND(L_sha1_loop);
     }
 
-    sha1_preserve_prev_abcde(a, b, c, d, e, prev_ab, prev_cd, prev_e);
+    sha1_preserve_prev_abcde(a0, b0, c0, d0, e0, prev_ab, prev_cd, prev_e);
+
+    Register a = a0, b = b0, c = c0, d = d0, e = e0;
 
     for (int round = 0; round < 80; round++) {
       // prepare K't value
       sha1_prepare_k(cur_k, round);
 
       // prepare W't value
-      sha1_prepare_w(cur_w, ws, buf, round);
+      sha1_prepare_w(cur_w, ws, buf, cur_k, round);
 
       // one round process
-      sha1_process_round(a, b, c, d, e, cur_k, cur_w, t2, round);
+      sha1_process_round(a, b, c, d, e, cur_w, t2, round);
+
+      // Software register renaming for next round:
+      //   a' = e, b' = a, c' = b, d' = c, e' = d
+      Register pa = a, pb = b, pc = c, pd = d, pe = e;
+      a = pe, b = pa, c = pb, d = pc, e = pd;
     }
 
     // compute the intermediate hash value
