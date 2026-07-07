@@ -7220,6 +7220,25 @@ instruct urShiftL_reg_reg(iRegLNoSp dst, iRegL src1, iRegIorL2I src2) %{
 %}
 
 // Shift Right Logical Immediate
+instruct urShiftL2I_reg_imm(iRegINoSp dst, iRegL src1, immI src2) %{
+  predicate(((n->in(1)->in(2)->get_int() & 0x3f) > 32) ||
+            (n->in(1)->in(1)->bottom_type()->isa_long() &&
+             n->in(1)->in(1)->bottom_type()->is_long()->_lo >= 0 &&
+             (n->in(1)->in(1)->bottom_type()->is_long()->_hi >> (n->in(1)->in(2)->get_int() & 0x3f)) <= (jlong)max_jint));
+  match(Set dst (ConvL2I (URShiftL src1 src2)));
+
+  ins_cost(ALU_COST);
+  format %{ "srli  $dst, $src1, ($src2 & 0x3f)\t#@urShiftL2I_reg_imm" %}
+
+  ins_encode %{
+    __ srli(as_Register($dst$$reg),
+            as_Register($src1$$reg),
+            (unsigned) $src2$$constant & 0x3f);
+  %}
+
+  ins_pipe(ialu_reg_shift);
+%}
+
 instruct urShiftL_reg_imm(iRegLNoSp dst, iRegL src1, immI src2) %{
   match(Set dst (URShiftL src1 src2));
 
