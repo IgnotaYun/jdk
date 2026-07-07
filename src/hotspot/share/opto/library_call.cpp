@@ -54,6 +54,7 @@
 #include "prims/jvmtiExport.hpp"
 #include "prims/jvmtiThreadState.hpp"
 #include "prims/unsafe.hpp"
+#include "runtime/globals.hpp"
 #include "runtime/jniHandles.inline.hpp"
 #include "runtime/mountUnmountDisabler.hpp"
 #include "runtime/objectMonitor.hpp"
@@ -4804,7 +4805,15 @@ bool LibraryCallKit::inline_native_hashcode(bool is_virtual, bool is_static) {
   // The control of the load must be null. Otherwise, the load can move before
   // the null check after castPP removal.
   Node* no_ctrl = nullptr;
-  Node* header = make_load(no_ctrl, header_addr, TypeX_X, TypeX_X->basic_type(), MemNode::unordered);
+  auto header_type = TypeX_X;
+#ifdef _LP64
+  // Without compact headers, only bits [41:0] are used.
+  // See markWord.hpp for details. Needs to be kept in sync.
+  if (!UseCompactObjectHeaders) {
+    header_type = TypeLong::make(0, (jlong(1) << (markWord::hash_shift + markWord::hash_bits)) - 1, Type::WidenMax);
+  }
+#endif
+  Node* header = make_load(no_ctrl, header_addr, header_type, header_type->basic_type(), MemNode::unordered);
 
   if (!UseObjectMonitorTable) {
     // Test the header to see if it is safe to read w.r.t. locking.
@@ -4829,7 +4838,18 @@ bool LibraryCallKit::inline_native_hashcode(bool is_virtual, bool is_static) {
   // Java spec says that HashCode is an int so there's no point in capturing
   // an 'X'-sized hashcode (32 in 32-bit build or 64 in 64-bit build).
   hshifted_header      = ConvX2I(hshifted_header);
-  Node *hash_val       = _gvn.transform(new AndINode(hshifted_header, hash_mask));
+  Node *hash_val;
+#ifdef _LP64
+  if (!UseCompactObjectHeaders) {
+  // Without compact headers, bits [63:42] are zero, after URShiftL(header, 11),
+  // that's [63:31] are zero, so shifted result is already clear.
+  // See markWord.hpp for details. Needs to be kept in sync.
+    hash_val = hshifted_header;
+  } else
+#endif
+  {
+    hash_val = _gvn.transform(new AndINode(hshifted_header, hash_mask));
+  }
 
   Node *no_hash_val    = _gvn.intcon(markWord::no_hash);
   Node *chk_assigned   = _gvn.transform(new CmpINode( hash_val, no_hash_val));
