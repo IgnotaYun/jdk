@@ -3861,11 +3861,11 @@ opclass immIorL(immI, immL);
 //----------PIPELINE-----------------------------------------------------------
 // Rules which define the behavior of the target architectures pipeline.
 
-// For specific pipelines, e.g. generic RISC-V, define the stages of that pipeline
-//pipe_desc(ID, EX, MEM, WR);
-#define ID   S0
-#define EX   S1
-#define MEM  S2
+// For specific pipelines, e.g. U74, define the stages of that pipeline
+//pipe_desc(ISS, EX1, EX2, WR);
+#define ISS  S0
+#define EX1  S1
+#define EX2  S2
 #define WR   S3
 
 // Integer ALU reg operation
@@ -3893,19 +3893,13 @@ attributes %{
 //----------RESOURCES----------------------------------------------------------
 // Resources are the functional units available to the machine
 
-// Generic RISC-V pipeline
-// 1 decoder
-// 1 instruction decoded per cycle
-// 1 load/store ops per cycle, 1 branch, 1 FPU
-// 1 mul, 1 div
-
-resources ( DECODE,
-            ALU,
-            MUL,
-            DIV,
-            BRANCH,
-            LDST,
-            FPU);
+resources( INS0, INS1, INS01 = INS0 | INS1,
+           ALU0, ALU1, ALU = ALU0 | ALU1,
+           MUL,
+           DIV,
+           BRANCH,
+           LDST,
+           FPU);
 
 //----------PIPELINE DESCRIPTION-----------------------------------------------
 // Pipeline Description specifies the stages in the machine's pipeline
@@ -3923,16 +3917,17 @@ pipe_class fp_dop_reg_reg_s(fRegF dst, fRegF src1, fRegF src2)
   src1   : S1(read);
   src2   : S2(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
 pipe_class fp_dop_reg_reg_d(fRegD dst, fRegD src1, fRegD src2)
 %{
+  single_instruction;
   src1   : S1(read);
   src2   : S2(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -3941,7 +3936,7 @@ pipe_class fp_uop_s(fRegF dst, fRegF src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -3950,7 +3945,7 @@ pipe_class fp_uop_d(fRegD dst, fRegD src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -3959,7 +3954,7 @@ pipe_class fp_d2f(fRegF dst, fRegD src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -3968,7 +3963,7 @@ pipe_class fp_f2d(fRegD dst, fRegF src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -3977,7 +3972,7 @@ pipe_class fp_f2i(iRegINoSp dst, fRegF src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -3986,7 +3981,7 @@ pipe_class fp_f2l(iRegLNoSp dst, fRegF src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -3995,7 +3990,7 @@ pipe_class fp_i2f(fRegF dst, iRegIorL2I src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -4004,7 +3999,7 @@ pipe_class fp_l2f(fRegF dst, iRegL src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -4013,7 +4008,7 @@ pipe_class fp_d2i(iRegINoSp dst, fRegD src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -4022,7 +4017,7 @@ pipe_class fp_d2l(iRegLNoSp dst, fRegD src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -4031,7 +4026,7 @@ pipe_class fp_i2d(fRegD dst, iRegIorL2I src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -4040,7 +4035,7 @@ pipe_class fp_l2d(fRegD dst, iRegIorL2I src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS01  : ISS;
   FPU    : S5;
 %}
 
@@ -4050,7 +4045,7 @@ pipe_class fp_div_s(fRegF dst, fRegF src1, fRegF src2)
   src1   : S1(read);
   src2   : S2(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS0   : ISS;
   FPU    : S5;
 %}
 
@@ -4060,7 +4055,7 @@ pipe_class fp_div_d(fRegD dst, fRegD src1, fRegD src2)
   src1   : S1(read);
   src2   : S2(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS0   : ISS;
   FPU    : S5;
 %}
 
@@ -4069,7 +4064,7 @@ pipe_class fp_sqrt_s(fRegF dst, fRegF src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS0   : ISS;
   FPU    : S5;
 %}
 
@@ -4078,42 +4073,42 @@ pipe_class fp_sqrt_d(fRegD dst, fRegD src)
   single_instruction;
   src    : S1(read);
   dst    : S5(write);
-  DECODE : ID;
+  INS0   : ISS;
   FPU    : S5;
 %}
 
 pipe_class fp_load_constant_s(fRegF dst)
 %{
   single_instruction;
-  dst    : S5(write);
-  DECODE : ID;
-  FPU    : S5;
+  dst    : S4(write);
+  INS01  : ISS;
+  FPU    : S4;
 %}
 
 pipe_class fp_load_constant_d(fRegD dst)
 %{
   single_instruction;
-  dst    : S5(write);
-  DECODE : ID;
-  FPU    : S5;
+  dst    : S4(write);
+  INS01  : ISS;
+  FPU    : S4;
 %}
 
 pipe_class fp_load_mem_s(fRegF dst, memory mem)
 %{
   single_instruction;
-  mem    : S1(read);
+  mem    : ISS(read);
   dst    : S5(write);
-  DECODE : ID;
-  LDST   : MEM;
+  INS01  : ISS;
+  LDST   : WR;
 %}
 
 pipe_class fp_load_mem_d(fRegD dst, memory mem)
 %{
   single_instruction;
-  mem    : S1(read);
+  mem    : ISS(read);
   dst    : S5(write);
-  DECODE : ID;
-  LDST   : MEM;
+  INS01  : ISS;
+  LDST   : WR;
 %}
 
 pipe_class fp_store_reg_s(fRegF src, memory mem)
@@ -4121,8 +4116,8 @@ pipe_class fp_store_reg_s(fRegF src, memory mem)
   single_instruction;
   src    : S1(read);
   mem    : S5(write);
-  DECODE : ID;
-  LDST   : MEM;
+  INS01  : ISS;
+  LDST   : WR;
 %}
 
 pipe_class fp_store_reg_d(fRegD src, memory mem)
@@ -4130,23 +4125,23 @@ pipe_class fp_store_reg_d(fRegD src, memory mem)
   single_instruction;
   src    : S1(read);
   mem    : S5(write);
-  DECODE : ID;
-  LDST   : MEM;
+  INS01  : ISS;
+  LDST   : WR;
 %}
 
 //------- Integer ALU operations --------------------------
 
 // Integer ALU reg-reg operation
-// Operands needs in ID, result generated in EX
+// Operands needed in EX1, result generated in EX2
 // E.g.  ADD   Rd, Rs1, Rs2
 pipe_class ialu_reg_reg(iRegI dst, iRegI src1, iRegI src2)
 %{
   single_instruction;
-  dst    : EX(write);
-  src1   : ID(read);
-  src2   : ID(read);
-  DECODE : ID;
-  ALU    : EX;
+  dst    : EX2(write);
+  src1   : EX1(read);
+  src2   : EX1(read);
+  INS01  : ISS;
+  ALU    : EX2;
 %}
 
 // Integer ALU reg operation with constant shift
@@ -4154,23 +4149,24 @@ pipe_class ialu_reg_reg(iRegI dst, iRegI src1, iRegI src2)
 pipe_class ialu_reg_shift(iRegI dst, iRegI src1)
 %{
   single_instruction;
-  dst    : EX(write);
-  src1   : ID(read);
-  DECODE : ID;
-  ALU    : EX;
+  dst    : EX2(write);
+  src1   : ISS(read);
+  INS01  : ISS;
+  ALU    : EX2;
 %}
 
 // Integer ALU reg-reg operation with variable shift
-// both operands must be available in ID
+// Both operands must be available in ISS
+// Result is available in EX1 instead of EX2
 // E.g. SLL   Rd, Rs1, Rs2
 pipe_class ialu_reg_reg_vshift(iRegI dst, iRegI src1, iRegI src2)
 %{
   single_instruction;
-  dst    : EX(write);
-  src1   : ID(read);
-  src2   : ID(read);
-  DECODE : ID;
-  ALU    : EX;
+  dst    : EX1(write);
+  src1   : ISS(read);
+  src2   : ISS(read);
+  INS01  : ISS;
+  ALU    : EX1;
 %}
 
 // Integer ALU reg operation
@@ -4178,10 +4174,10 @@ pipe_class ialu_reg_reg_vshift(iRegI dst, iRegI src1, iRegI src2)
 pipe_class ialu_reg(iRegI dst, iRegI src)
 %{
   single_instruction;
-  dst    : EX(write);
-  src    : ID(read);
-  DECODE : ID;
-  ALU    : EX;
+  dst    : EX2(write);
+  src    : EX1(read);
+  INS01  : ISS;
+  ALU    : EX2;
 %}
 
 // Integer ALU reg immediate operation
@@ -4189,10 +4185,10 @@ pipe_class ialu_reg(iRegI dst, iRegI src)
 pipe_class ialu_reg_imm(iRegI dst, iRegI src1)
 %{
   single_instruction;
-  dst    : EX(write);
-  src1   : ID(read);
-  DECODE : ID;
-  ALU    : EX;
+  dst    : EX2(write);
+  src1   : EX1(read);
+  INS01  : ISS;
+  ALU    : EX2;
 %}
 
 // Integer ALU immediate operation (no source operands)
@@ -4200,9 +4196,9 @@ pipe_class ialu_reg_imm(iRegI dst, iRegI src1)
 pipe_class ialu_imm(iRegI dst)
 %{
   single_instruction;
-  dst    : EX(write);
-  DECODE : ID;
-  ALU    : EX;
+  dst    : EX1(write);
+  INS01  : ISS;
+  ALU    : EX1;
 %}
 
 //------- Multiply pipeline operations --------------------
@@ -4213,9 +4209,9 @@ pipe_class imul_reg_reg(iRegI dst, iRegI src1, iRegI src2)
 %{
   single_instruction;
   dst    : WR(write);
-  src1   : ID(read);
-  src2   : ID(read);
-  DECODE : ID;
+  src1   : ISS(read);
+  src2   : ISS(read);
+  INS01  : ISS;
   MUL    : WR;
 %}
 
@@ -4225,9 +4221,9 @@ pipe_class lmul_reg_reg(iRegL dst, iRegL src1, iRegL src2)
   single_instruction;
   fixed_latency(3); // Maximum latency for 64 bit mul
   dst    : WR(write);
-  src1   : ID(read);
-  src2   : ID(read);
-  DECODE : ID;
+  src1   : ISS(read);
+  src2   : ISS(read);
+  INS01  : ISS;
   MUL    : WR;
 %}
 
@@ -4239,9 +4235,9 @@ pipe_class idiv_reg_reg(iRegI dst, iRegI src1, iRegI src2)
   single_instruction;
   fixed_latency(8); // Maximum latency for 32 bit divide
   dst    : WR(write);
-  src1   : ID(read);
-  src2   : ID(read);
-  DECODE : ID;
+  src1   : ISS(read);
+  src2   : ISS(read);
+  INS0   : ISS; // Can only issue as instruction 0
   DIV    : WR;
 %}
 
@@ -4251,9 +4247,9 @@ pipe_class ldiv_reg_reg(iRegL dst, iRegL src1, iRegL src2)
   single_instruction;
   fixed_latency(16); // Maximum latency for 64 bit divide
   dst    : WR(write);
-  src1   : ID(read);
-  src2   : ID(read);
-  DECODE : ID;
+  src1   : ISS(read);
+  src2   : ISS(read);
+  INS0   : ISS; // Can only issue as instruction 0
   DIV    : WR;
 %}
 
@@ -4264,9 +4260,9 @@ pipe_class ldiv_reg_reg(iRegL dst, iRegL src1, iRegL src2)
 pipe_class iload_prefetch(memory mem)
 %{
   single_instruction;
-  mem    : ID(read);
-  DECODE : ID;
-  LDST   : MEM;
+  mem    : ISS(read);
+  INS01  : ISS;
+  LDST   : WR;
 %}
 
 // Load - reg, mem
@@ -4275,9 +4271,9 @@ pipe_class iload_reg_mem(iRegI dst, memory mem)
 %{
   single_instruction;
   dst    : WR(write);
-  mem    : ID(read);
-  DECODE : ID;
-  LDST   : MEM;
+  mem    : ISS(read);
+  INS01  : ISS;
+  LDST   : WR;
 %}
 
 // Load - reg, reg
@@ -4286,9 +4282,9 @@ pipe_class iload_reg_reg(iRegI dst, iRegI src)
 %{
   single_instruction;
   dst    : WR(write);
-  src    : ID(read);
-  DECODE : ID;
-  LDST   : MEM;
+  src    : ISS(read);
+  INS01  : ISS;
+  LDST   : WR;
 %}
 
 //------- Store pipeline operations -----------------------
@@ -4298,9 +4294,9 @@ pipe_class iload_reg_reg(iRegI dst, iRegI src)
 pipe_class istore_mem(memory mem)
 %{
   single_instruction;
-  mem    : ID(read);
-  DECODE : ID;
-  LDST   : MEM;
+  mem    : ISS(read);
+  INS01  : ISS;
+  LDST   : WR;
 %}
 
 // Store - reg, mem
@@ -4308,10 +4304,10 @@ pipe_class istore_mem(memory mem)
 pipe_class istore_reg_mem(iRegI src, memory mem)
 %{
   single_instruction;
-  mem    : ID(read);
-  src    : EX(read);
-  DECODE : ID;
-  LDST   : MEM;
+  mem    : ISS(read);
+  src    : EX2(read);
+  INS01  : ISS;
+  LDST   : WR;
 %}
 
 // Store - reg, reg
@@ -4319,10 +4315,10 @@ pipe_class istore_reg_mem(iRegI src, memory mem)
 pipe_class istore_reg_reg(iRegI dst, iRegI src)
 %{
   single_instruction;
-  dst    : ID(read);
-  src    : EX(read);
-  DECODE : ID;
-  LDST   : MEM;
+  dst    : ISS(read);
+  src    : EX2(read);
+  INS01  : ISS;
+  LDST   : WR;
 %}
 
 //------- Control transfer pipeline operations ------------
@@ -4331,17 +4327,17 @@ pipe_class istore_reg_reg(iRegI dst, iRegI src)
 pipe_class pipe_branch()
 %{
   single_instruction;
-  DECODE : ID;
-  BRANCH : EX;
+  INS01  : ISS;
+  BRANCH : EX1;
 %}
 
 // Branch
 pipe_class pipe_branch_reg(iRegI src)
 %{
   single_instruction;
-  src    : ID(read);
-  DECODE : ID;
-  BRANCH : EX;
+  src    : EX1(read);
+  INS01  : ISS;
+  BRANCH : EX1;
 %}
 
 // Compare & Branch
@@ -4349,31 +4345,31 @@ pipe_class pipe_branch_reg(iRegI src)
 pipe_class pipe_cmp_branch(iRegI src1, iRegI src2)
 %{
   single_instruction;
-  src1   : ID(read);
-  src2   : ID(read);
-  DECODE : ID;
-  BRANCH : EX;
+  src1   : EX1(read);
+  src2   : EX1(read);
+  INS01  : ISS;
+  BRANCH : EX1;
 %}
 
 // E.g. BEQZ Rs, L
 pipe_class pipe_cmpz_branch(iRegI src)
 %{
   single_instruction;
-  src    : ID(read);
-  DECODE : ID;
-  BRANCH : EX;
+  src    : EX1(read);
+  INS01  : ISS;
+  BRANCH : EX1;
 %}
 
 //------- Synchronisation operations ----------------------
 // Any operation requiring serialization
-// E.g. FENCE/Atomic Ops/Load Acquire/Store Release
+// E.g. FENCE / Atomic Ops / Load Acquire / Store Release
 pipe_class pipe_serial()
 %{
   single_instruction;
   force_serialization;
   fixed_latency(16);
-  DECODE : ID;
-  LDST   : MEM;
+  INS01  : ISS(2); // Cannot dual issue with any other instruction
+  LDST   : WR;
 %}
 
 pipe_class pipe_slow()
@@ -4382,8 +4378,8 @@ pipe_class pipe_slow()
   multiple_bundles;
   force_serialization;
   fixed_latency(16);
-  DECODE : ID;
-  LDST   : MEM;
+  INS01  : ISS(2); // Cannot dual issue with any other instruction
+  LDST   : WR;
 %}
 
 // The real do-nothing guy
