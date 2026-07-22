@@ -2670,6 +2670,17 @@ operand immI_M1()
   interface(CONST_INTER);
 %}
 
+// 32 bit positive bitmask
+operand immI_bitmask()
+%{
+  predicate((n->get_int() > 0) && is_power_of_2((unsigned)n->get_int() + 1));
+  match(ConI);
+
+  op_cost(0);
+  format %{ %}
+  interface(CONST_INTER);
+%}
+
 // Unsigned Integer Immediate:  6-bit int, greater than 32
 operand uimmI6_ge32() %{
   predicate(((unsigned int)(n->get_int()) < 64) && (n->get_int() >= 32));
@@ -2872,6 +2883,17 @@ operand immL_32bits()
 operand immL_M1()
 %{
   predicate(n->get_long() == -1);
+  match(ConL);
+
+  op_cost(0);
+  format %{ %}
+  interface(CONST_INTER);
+%}
+
+// 64 bit positive bitmask
+operand immL_bitmask()
+%{
+  predicate((n->get_long() > 0) && is_power_of_2((unsigned long)n->get_long() + 1));
   match(ConL);
 
   op_cost(0);
