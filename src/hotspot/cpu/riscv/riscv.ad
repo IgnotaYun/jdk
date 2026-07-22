@@ -8032,6 +8032,37 @@ instruct andI_bitmask(iRegINoSp dst, iRegIorL2I src1, immI_bitmask mask) %{
   ins_pipe(ialu_reg_shift);
 %}
 
+// Extract a 32-bit bitfield from a 64-bit value: (x >>> shamt) & bitmask
+// Used in hashCode() when UseCompactObjectHeaders is disabled.
+instruct andI_bitmask_urShiftL2I(iRegINoSp dst, iRegL src1, immI rshift, immI_bitmask mask) %{
+  match(Set dst (AndI (ConvL2I (URShiftL src1 rshift)) mask));
+  predicate((n->in(1)->in(1)->in(2)->get_int() & 0x3f) > 32 ||
+            population_count((unsigned)n->in(2)->get_int()) < 32);
+
+  ins_cost(ALU_COST * 2);
+  format %{
+    "slli  $dst, $src1, max(64-$rshift-popcount($mask),0)\n\t"
+    "srli  $dst, $dst, 64-popcount($mask)\t#@andI_bitmask_urShiftL2I"
+  %}
+
+  ins_encode %{
+    int shamt = $rshift$$constant & 0x3f;
+    int mask_val = $mask$$constant;
+    int width = population_count((unsigned)mask_val);
+    int eff_width = MIN2(width, 64 - shamt);
+    int lshift = 64 - shamt - eff_width;
+    int rshift_out = 64 - eff_width;
+    if (lshift > 0) {
+      __ slli(as_Register($dst$$reg), as_Register($src1$$reg), lshift);
+      __ srli(as_Register($dst$$reg), as_Register($dst$$reg), rshift_out);
+    } else {
+      __ srli(as_Register($dst$$reg), as_Register($src1$$reg), rshift_out);
+    }
+  %}
+
+  ins_pipe(ialu_reg_shift);
+%}
+
 // Immediate And
 instruct andI_reg_imm(iRegINoSp dst, iRegI src1, immIAdd src2) %{
   match(Set dst (AndI src1 src2));
