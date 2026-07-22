@@ -8007,6 +8007,31 @@ instruct andI_reg_reg(iRegINoSp dst, iRegI src1, iRegI src2) %{
   ins_pipe(ialu_reg_reg);
 %}
 
+// 32-bit bitmask, clear upper bits of an int.
+// This pattern is used by java.util.concurrent.ConcurrentHashMap::spread:
+// h & HASH_BITS, where HASH_BITS = 0x7fffffff.
+instruct andI_bitmask(iRegINoSp dst, iRegIorL2I src1, immI_bitmask mask) %{
+  predicate(n->in(2)->get_int() > 0x7ff &&
+            !is_power_of_2(population_count((unsigned)n->in(2)->get_int())));
+  match(Set dst (AndI src1 mask));
+
+  ins_cost(ALU_COST * 2);
+  format %{
+    "slli  $dst, $src1, 64-popcount($mask)\n\t"
+    "srli  $dst, $dst, 64-popcount($mask)\t#@andI_bitmask"
+  %}
+
+  ins_encode %{
+    int mask_val = $mask$$constant;
+    int width = population_count((unsigned)mask_val);
+    int shamt = 64 - width;
+    __ slli(as_Register($dst$$reg), as_Register($src1$$reg), shamt);
+    __ srli(as_Register($dst$$reg), as_Register($dst$$reg), shamt);
+  %}
+
+  ins_pipe(ialu_reg_shift);
+%}
+
 // Immediate And
 instruct andI_reg_imm(iRegINoSp dst, iRegI src1, immIAdd src2) %{
   match(Set dst (AndI src1 src2));
