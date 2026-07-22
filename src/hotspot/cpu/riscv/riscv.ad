@@ -8206,6 +8206,64 @@ instruct andL_bitmask(iRegLNoSp dst, iRegL src1, immL_bitmask mask) %{
   ins_pipe(ialu_reg_shift);
 %}
 
+// Extract a 32-bit bitfield from a 64-bit value: (x >>> shamt) & bitmask
+instruct andL2I_bitmask_urShiftL(iRegINoSp dst, iRegL src1, immI rshift, immL_bitmask mask) %{
+  predicate((n->in(1)->in(1)->in(2)->get_int() & 0x3f) > 32 ||
+            population_count((unsigned long)n->in(1)->in(2)->get_long()) < 32);
+  match(Set dst (ConvL2I (AndL (URShiftL src1 rshift) mask)));
+
+  ins_cost(ALU_COST * 2);
+  format %{
+    "slli  $dst, $src1, max(64-$rshift-popcount($mask),0)\n\t"
+    "srli  $dst, $dst, 64-popcount($mask)\t#@andL2I_bitmask_urShiftL"
+  %}
+
+  ins_encode %{
+    int shamt = $rshift$$constant & 0x3f;
+    long mask_val = $mask$$constant;
+    int width = population_count((unsigned long)mask_val);
+    int eff_width = MIN2(width, 64 - shamt);
+    int lshift = 64 - shamt - eff_width;
+    int rshift_out = 64 - eff_width;
+    if (lshift > 0) {
+      __ slli(as_Register($dst$$reg), as_Register($src1$$reg), lshift);
+      __ srli(as_Register($dst$$reg), as_Register($dst$$reg), rshift_out);
+    } else {
+      __ srli(as_Register($dst$$reg), as_Register($src1$$reg), rshift_out);
+    }
+  %}
+
+  ins_pipe(ialu_reg_shift);
+%}
+
+// Extract a 64-bit bitfield from a 64-bit value: (x >>> shamt) & bitmask
+instruct andL_bitmask_urShiftL(iRegLNoSp dst, iRegL src1, immI rshift, immL_bitmask mask) %{
+  match(Set dst (AndL (URShiftL src1 rshift) mask));
+
+  ins_cost(ALU_COST * 2);
+  format %{
+    "slli  $dst, $src1, max(64-$rshift-popcount($mask),0)\n\t"
+    "srli  $dst, $dst, 64-popcount($mask)\t#@andL_bitmask_urShiftL"
+  %}
+
+  ins_encode %{
+    int shamt = $rshift$$constant & 0x3f;
+    long mask_val = $mask$$constant;
+    int width = population_count((unsigned long)mask_val);
+    int eff_width = MIN2(width, 64 - shamt);
+    int lshift = 64 - shamt - eff_width;
+    int rshift_out = 64 - eff_width;
+    if (lshift > 0) {
+      __ slli(as_Register($dst$$reg), as_Register($src1$$reg), lshift);
+      __ srli(as_Register($dst$$reg), as_Register($dst$$reg), rshift_out);
+    } else {
+      __ srli(as_Register($dst$$reg), as_Register($src1$$reg), rshift_out);
+    }
+  %}
+
+  ins_pipe(ialu_reg_shift);
+%}
+
 // Immediate And Long
 instruct andL_reg_imm(iRegLNoSp dst, iRegL src1, immLAdd src2) %{
   match(Set dst (AndL src1 src2));
